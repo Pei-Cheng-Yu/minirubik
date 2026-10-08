@@ -7,6 +7,7 @@ C_SOURCES := $(wildcard *.c *.h)
 SAMPLE_STATE := 21345671111111
 SAMPLE_SOLUTION := B' R' D2 R' B R B' R D2 B R'
 VECTORS := tests/solutions.txt
+IDA_VECTORS := tests/solutions_ida.txt
 # One per rejection path: short, long, cubie digit low, cubie digit high,
 # orientation digit low, orientation digit high, non-digit, duplicate, parity.
 INVALID_STATES := 1234567111111 123456711111111 02345671111111 82345671111111 \
@@ -25,26 +26,29 @@ mini: mini.c
 check: solver mini $(VECTORS)
 	./solver --self-test
 	@expected=$$(mktemp); actual=$$(mktemp); \
-		trap 'rm -f "$$expected" "$$actual"' 0 1 2 15; \
+	trap 'rm -f "$$expected" "$$actual"' 0 1 2 15; \
+	for binary in ./solver ./mini; do \
+		case "$$binary" in \
+			./solver) vectors="$(IDA_VECTORS)" ;; \
+			./mini) vectors="$(VECTORS)" ;; \
+		esac; \
 		count=0; \
 		while IFS='|' read -r state solution; do \
 			case "$$state" in ""|\#*) continue ;; esac; \
+			solution=$$(printf '%s' "$$solution" | tr -d '\r'); \
 			printf '%s\n' "$$solution" >"$$expected"; \
-			for binary in ./solver ./mini; do \
-				$$binary "$$state" >"$$actual"; \
-				status=$$?; \
-				test $$status -eq 0 || { \
-					echo "$$binary $$state: exit status $$status"; exit 1; }; \
-				cmp -s "$$actual" "$$expected" || { \
-					echo "$$binary $$state: output mismatch"; \
-					echo "  expected: $$solution"; \
-					printf '  got:      '; cat "$$actual"; \
-					echo "  ($$(wc -c <"$$expected") bytes expected, \
-$$(wc -c <"$$actual") produced)"; exit 1; }; \
-			done; \
+			$$binary "$$state" >"$$actual"; \
+			status=$$?; \
+			test $$status -eq 0 || { \
+				echo "$$binary $$state: exit status $$status"; exit 1; }; \
+			cmp -s "$$actual" "$$expected" || { \
+				echo "$$binary $$state: output mismatch"; \
+				echo "  expected: $$solution"; \
+				printf '  got:      '; cat "$$actual"; exit 1; }; \
 			count=$$((count + 1)); \
-		done <$(VECTORS); \
-		echo "$$count solution vectors matched by solver and mini"
+		done <"$$vectors"; \
+		echo "$$count solution vectors matched by $$binary"; \
+	done
 	@for binary in ./solver ./mini; do \
 		for bad in $(INVALID_STATES); do \
 			$$binary "$$bad" >/dev/null 2>&1; \
