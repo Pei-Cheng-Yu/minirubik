@@ -3,3 +3,6 @@
 *.swp
 solver
 mini
+gen_pdb
+pdb4_data.h
+pdb4_data.h.tmp

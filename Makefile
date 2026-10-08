@@ -13,7 +13,16 @@ IDA_VECTORS := tests/solutions_ida.txt
 INVALID_STATES := 1234567111111 123456711111111 02345671111111 82345671111111 \
 	12345671111110 12345671111114 1234567111111a 11345671111111 12345671111112
 
-.PHONY: all check prove clean indent
+.PHONY: all check check-pdb prove clean indent
+# The generator runs on the host, not in Ripes.
+gen_pdb: gen_pdb.c
+	$(CC) $(CFLAGS) -UNDEBUG $< -o $@
+
+pdb4_data.h: gen_pdb
+	./gen_pdb > $@.tmp && mv $@.tmp $@
+
+check-pdb: gen_pdb pdb4_data.h
+	./gen_pdb --self-test
 
 all: solver mini
 
@@ -98,4 +107,4 @@ endif
 	$(CLANG_FORMAT) -i $(C_SOURCES)
 
 clean:
-	$(RM) solver mini
+	$(RM) solver mini gen_pdb pdb4_data.h pdb4_data.h.tmp

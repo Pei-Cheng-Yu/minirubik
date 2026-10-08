@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "pdb4.h"
+#include "pdb4_data.h"
 
 enum {
     CUBIES = 7,
@@ -27,17 +29,6 @@ typedef struct {
 static const char *const move_names[MOVES] = {"R",  "R2", "R'", "B", "B2",
                                               "B'", "D",  "D2", "D'"};
 static const uint8_t inverse_move[MOVES] = {2, 1, 0, 5, 4, 3, 8, 7, 6};
-/* Each destination takes a cubie from source[face][destination]. */
-static const uint8_t source[3][CUBIES] = {
-    {1, 4, 2, 0, 3, 5, 6},
-    {0, 1, 2, 4, 5, 6, 3},
-    {0, 2, 5, 3, 1, 4, 6},
-};
-static const uint8_t twist[3][CUBIES] = {
-    {1, 2, 0, 2, 1, 0, 0},
-    {0, 0, 0, 1, 2, 1, 2},
-    {0, 0, 0, 0, 0, 0, 0},
-};
 
 /* The three quarter-turns preserve the fixed front-upper-left corner. */
 /*@ requires face < 3;
@@ -226,9 +217,14 @@ static void build_moves(void)
 /* temporal heruistic that will be replace by PDB later*/
 static uint8_t heuristic(uint16_t p, uint16_t o)
 {
-    (void) p;
-    (void) o;
-    return 0;
+    state_t state;
+    unrank_state((uint32_t) p * ORIENTATIONS + o, &state);
+
+    pdb4_state projected_s = pdb4_project(state.p, state.o);
+    uint32_t index = pdb4_rank(&projected_s);
+    //pdb look up and select the right half-byte (we use 4 bit entries)
+    return (uint8_t)
+        ((pdb4_distances[index / 2] >> ((index % 2) * 4)) & 15);
 }
 
 static int solve_ida(uint16_t start_p, uint16_t start_o,
@@ -374,6 +370,7 @@ int main(int argc, char **argv)
     }
 
     if (argc != 2 || !parse_state(argv[1], &state)) {
+        /* C99 5.1.2.2.1 lets argv[0] be null when argc is 0. */
         fprintf(stderr, "usage: %s PPPPPPPOOOOOOO\n",
                 argc > 0 && argv[0] ? argv[0] : "solver");
         return 2;

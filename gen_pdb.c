@@ -1,0 +1,165 @@
+/* Host-only generator for one four-cubie pattern database.
+ * The solver does not link this program or its construction arrays.
+ */
+#include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include "pdb4.h"
+/* Keep self-test assertions active even when callers define NDEBUG. */
+#ifdef NDEBUG
+#error "Build gen_pdb with assertions enabled (remove NDEBUG or use -UNDEBUG)"
+#endif
+
+/* Each destination takes a cubie from source[face][destination]. */
+static const uint8_t pdb_source[3][7] = {
+    {1, 4, 2, 0, 3, 5, 6},
+    {0, 1, 2, 4, 5, 6, 3},
+    {0, 2, 5, 3, 1, 4, 6},
+};
+static const uint8_t pdb_twist[3][7] = {
+    {1, 2, 0, 2, 1, 0, 0},
+    {0, 0, 0, 1, 2, 1, 2},
+    {0, 0, 0, 0, 0, 0, 0},
+};
+
+static uint8_t pdb4_dist[PDB4_ENTRIES];
+static uint32_t pdb4_queue[PDB4_ENTRIES];
+static uint8_t pdb4_packed[PDB4_BYTES];
+
+static uint32_t pdb4_build(void)
+{
+    const uint8_t solved_p[7] = {0, 1, 2, 3, 4, 5, 6};
+    const uint8_t solved_o[7] = {0};
+    pdb4_state solved = pdb4_project(solved_p, solved_o);
+    uint32_t goal = pdb4_rank(&solved);
+    uint32_t head = 0, tail = 1;
+
+    memset(pdb4_dist, UINT8_MAX, sizeof pdb4_dist);
+    pdb4_dist[goal] = 0;
+    pdb4_queue[0] = goal;
+
+    while (head < tail) {
+        uint32_t here = pdb4_queue[head++];
+        pdb4_state state = pdb4_unrank(here);
+        for (uint8_t face = 0; face < 3; ++face) {
+            pdb4_state next = state;
+            for (uint8_t turns = 0; turns < 3; ++turns) {
+                next = pdb4_quarter_turn(next, face);
+                uint32_t there = pdb4_rank(&next);
+                if (pdb4_dist[there] == UINT8_MAX) {
+                    /* R, R2 and R' all cost ONE move from 'here'. */
+                    pdb4_dist[there] = (uint8_t) (pdb4_dist[here] + 1);
+                    pdb4_queue[tail++] = there;
+                }
+            }
+        }
+    }
+    return tail;
+}
+
+/* Call only after every distance has been verified to fit four bits. */
+static void pdb4_pack(void)
+{
+    memset(pdb4_packed, 0, sizeof pdb4_packed);
+    for (uint32_t i = 0; i < PDB4_ENTRIES; ++i)
+        pdb4_packed[i / 2] |= (uint8_t) (pdb4_dist[i] << ((i % 2) * 4));
+}
+
+static void pdb4_self_test(void)
+{
+    uint8_t solved_p[7] = {0, 1, 2, 3, 4, 5, 6};
+    uint8_t solved_o[7] = {0};
+    pdb4_state solved = pdb4_project(solved_p, solved_o);
+    uint32_t goal = pdb4_rank(&solved);
+    /* Selected slots 1,2,5,6 give mixed-radix digits 1,1,3,3. */
+    assert(goal == 12555);
+
+    for (uint32_t i = 0; i < PDB4_ENTRIES; ++i) {
+        pdb4_state pattern = pdb4_unrank(i);
+        assert(pdb4_rank(&pattern) == i);
+    }
+    puts("PASS: all 68040 pattern rank/unrank round trips");
+
+    /* Ignored IDs and their twists must not affect a pattern. */
+    uint8_t other_p[7] = {3, 1, 2, 4, 0, 5, 6};
+    uint8_t other_o[7] = {1, 0, 0, 2, 0, 0, 0};
+    pdb4_state other = pdb4_project(other_p, other_o);
+    assert(pdb4_rank(&other) == goal);
+
+    assert(pdb4_build() == PDB4_ENTRIES);
+    assert(pdb4_dist[goal] == 0);
+    unsigned max_distance = 0;
+    for (uint32_t i = 0; i < PDB4_ENTRIES; ++i) {
+        unsigned d = pdb4_dist[i];
+        assert(d < 16);
+        assert((d == 0) == (i == goal));
+        if (d > max_distance)
+            max_distance = d;
+        pdb4_state s = pdb4_unrank(i);
+        int has_decreasing_move = (i == goal);
+        for (uint8_t face = 0; face < 3; ++face) {
+            pdb4_state child = s;
+            for (uint8_t turns = 0; turns < 3; ++turns) {
+                child = pdb4_quarter_turn(child, face);
+                unsigned next_d = pdb4_dist[pdb4_rank(&child)];
+                assert(d <= next_d + 1);
+                assert(next_d <= d + 1);
+                if (next_d + 1 == d)
+                    has_decreasing_move = 1;
+            }
+        }
+        assert(has_decreasing_move);
+    }
+    assert(max_distance == 8);
+    puts("PASS: exact shortest distances for all patterns; maximum 8");
+
+    pdb4_pack();
+    for (uint32_t i = 0; i < PDB4_ENTRIES; ++i)
+        assert(((pdb4_packed[i / 2] >> ((i % 2) * 4)) & 15) == pdb4_dist[i]);
+    assert(sizeof pdb4_packed == 34020);
+    puts("PASS: all packed distances match; 34020 bytes");
+}
+
+int main(int argc, char **argv)
+{
+    if (argc == 2 && !strcmp(argv[1], "--self-test")) {
+        pdb4_self_test();
+        return fflush(stdout) != 0 || ferror(stdout);
+    }
+    if (argc != 1) {
+        fputs("usage: gen_pdb [--self-test]\n", stderr);
+        return 2;
+    }
+    if (pdb4_build() != PDB4_ENTRIES) {
+        fputs("PDB generation failed: unreachable pattern\n", stderr);
+        return 1;
+    }
+    unsigned maximum = 0;
+    for (uint32_t i = 0; i < PDB4_ENTRIES; ++i) {
+        if (pdb4_dist[i] > maximum)
+            maximum = pdb4_dist[i];
+    }
+    if (maximum >= 16) {
+        fputs("PDB distance does not fit in four bits\n", stderr);
+        return 1;
+    }
+    pdb4_pack();
+
+    puts("/* Generated by gen_pdb.c; displayed cubies {2,3,6,7}. */");
+    puts("/* Position rank uses selected-label order; twists use slot order. */");
+    puts("#ifndef PDB4_DATA_H\n#define PDB4_DATA_H\n#include <stdint.h>");
+    printf("static const uint8_t pdb4_distances[%u] = {\n", (unsigned) PDB4_BYTES);
+    for (uint32_t i = 0; i < PDB4_BYTES; ++i) {
+        printf("%u,", (unsigned) pdb4_packed[i]);
+        if (i % 24 == 23)
+            putchar('\n');
+    }
+    puts("\n};\n#endif");
+
+    if (fflush(stdout) != 0 || ferror(stdout))
+        return 1;
+    fprintf(stderr, "PDB: %u entries, maximum distance %u, %u packed bytes\n",
+            (unsigned) PDB4_ENTRIES, maximum, (unsigned) PDB4_BYTES);
+    return 0;
+}
