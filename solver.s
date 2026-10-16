@@ -12,6 +12,8 @@ o:
 .align 4
 unrank_weights:
     .word 720, 120, 24, 6, 2, 1, 1
+orientation_weights:
+    .half 243, 81, 27, 9, 3, 1
 .text
 
 main:
@@ -182,31 +184,40 @@ unrank_inner_done:
     blt s6, t0, unrank_loop
 
 unrank_loop_done:
-    li s6, 5 #i=6
-    li s7, 0 #sum = 0
+    li s6, 5 #i=0
+    li s7, 0 #sum 
+    la t0, orientation_weights
 unrank_loop_o:
-    mv a0, s3 # dividend = o
-    li a1, 3
-    jal ra, unsigned_divmod #reminder in a1
-    mv s3, a0 #o /=3
-    add t1, s5, s6 #addr of o[i]
-    sb a1, 0(t1)
-    add s7, s7, a1 #sum = sum + o[i]
-    addi s6, s6, -1 #i--
-    bge s6, zero, unrank_loop_o
-    
-    #sum % 3.
-    mv a0, s7
-    li a1, 3
-    jal ra, unsigned_divmod  # a1 = sum % 3
+    lhu t1, 0(t0) # weight
+    slli t2, t1, 1 # twice the weight
+    li t3, 0 # digit
+    bltu s3, t2, unrank_o_try_one
+    sub s3, s3, t2
+    li t3, 2
+    j unrank_o_store
+unrank_o_try_one:
+    bltu s3, t1, unrank_o_store
+    sub s3, s3, t1
+    li t3, 1
+unrank_o_store:
+    add t4, s5, s6
+    sb t3, 0(t4) # o[i] = digit
+    add s7, s7, t3
+    li t5, 3
+    bltu s7, t5, unrank_o_next
+    addi s7, s7, -3
+unrank_o_next:
+    addi t0, t0, 2
+    addi s6, s6, 1
+    li t5, 6
+    blt s6, t5, unrank_loop_o
 
-    # (3 - sum % 3) % 3.
-    li t1, 3             
-    sub a0, t1, a1
-    li a1, 3
-    jal ra, unsigned_divmod  # a1 = final orientation
-
-    sb a1, 6(s5)            # o[6] = final orientation
+    li t3, 0
+    beq s7, zero, unrank_o_last
+    li t3, 3
+    sub t3, t3, s7
+unrank_o_last:
+    sb t3, 6(s5) # final o
 
     #restore and release stack frame.
     lw s7, 20(sp)
@@ -236,4 +247,3 @@ unsigned_divmod_done:
     mv a0, t2                 # Return quotient
     mv a1, t3                 # Return remainder
     ret
-    
