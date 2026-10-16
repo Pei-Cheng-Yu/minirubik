@@ -15,7 +15,7 @@ INVALID_STATES := 1234567111111 123456711111111 02345671111111 82345671111111 \
 
 .PHONY: all check check-pdb prove clean indent
 # The generator runs on the host, not in Ripes.
-gen_pdb: gen_pdb.c
+gen_pdb: gen_pdb.c pdb4.h
 	$(CC) $(CFLAGS) -UNDEBUG $< -o $@
 
 pdb4_data.h: gen_pdb
@@ -26,7 +26,7 @@ check-pdb: gen_pdb pdb4_data.h
 
 all: solver mini
 
-solver: solver.c
+solver: solver.c pdb4.h pdb4_data.h
 	$(CC) $(CFLAGS) $< -o $@
 
 mini: mini.c
@@ -108,3 +108,19 @@ endif
 
 clean:
 	$(RM) solver mini gen_pdb pdb4_data.h pdb4_data.h.tmp
+
+# Host-only state generator. No RISC-V tools or assembly required.
+.PHONY: states
+states: build/states/gen_states
+	./build/states/gen_states 11 > build/states/distance11.csv.tmp && mv build/states/distance11.csv.tmp build/states/distance11.csv
+
+build/states/gen_states: tools/gen_states.c solver.c pdb4.h pdb4_data.h
+	mkdir -p build/states
+	$(CC) $(CFLAGS) $< -o $@
+
+.PHONY: heuristic-counter
+heuristic-counter: build/states/count_heuristic
+
+build/states/count_heuristic: tools/count_heuristic.c solver.c pdb4.h pdb4_data.h
+	mkdir -p build/states
+	$(CC) $(CFLAGS) $< -o $@

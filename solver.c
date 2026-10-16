@@ -226,8 +226,15 @@ static void build_moves(void)
     }
 }
 /* temporal heruistic that will be replace by PDB later*/
+#ifdef COUNT_HEURISTIC
+static unsigned long long heuristic_calls;
+#endif
+
 static uint8_t heuristic(uint16_t p, uint16_t o)
 {
+#ifdef COUNT_HEURISTIC
+    ++heuristic_calls;
+#endif
     state_t state;
     unrank_state((uint32_t) p * ORIENTATIONS + o, &state);
 
