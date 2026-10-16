@@ -126,12 +126,23 @@ static void unrank_state(uint32_t rank, state_t *state)
         if (i < 5)
             f /= 6U - i;
     }
-    for (uint8_t i = 6; i-- > 0;) {
-        state->o[i] = (uint8_t) (o % 3U);
-        sum = (uint8_t) (sum + state->o[i]);
-        o /= 3U;
+    static const uint16_t weights[6] = {243, 81, 27, 9, 3, 1};
+    for (uint8_t i = 0; i < 6; ++i) {
+        uint32_t weight = weights[i], twice = weight << 1;
+        uint8_t digit = 0;
+        if (o >= twice) {
+            o -= twice;
+            digit = 2;
+        } else if (o >= weight) {
+            o -= weight;
+            digit = 1;
+        }
+        state->o[i] = digit;
+        sum = (uint8_t) (sum + digit);
+        if (sum >= 3)
+            sum = (uint8_t) (sum - 3);
     }
-    state->o[6] = (uint8_t) ((3U - sum % 3U) % 3U);
+    state->o[6] = (uint8_t) (sum == 0 ? 0 : 3 - sum);
 }
 
 /*@ requires \valid_read(state);
