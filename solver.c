@@ -200,7 +200,7 @@ typedef struct {
     uint8_t next_move;
     uint8_t previous_face;
     uint8_t incoming_move;
-    uint8_t reserved;
+    uint8_t h;
 } frame_t;
 
 static frame_t frames[MAX_DEPTH + 1];
@@ -241,56 +241,64 @@ static uint8_t heuristic(uint16_t p, uint16_t o)
 static int solve_ida(uint16_t start_p, uint16_t start_o,
                      uint8_t solution[MAX_DEPTH])
 {
-    unsigned bound = heuristic(start_p, start_o);
+    uint8_t start_h = heuristic(start_p, start_o);
+    unsigned bound = start_h;
     while (bound <= MAX_DEPTH) {
         unsigned next_bound = UINT32_MAX;
         unsigned depth = 0;
-        frames[0] = (frame_t) {start_p, start_o, 0, NO_FACE, 0, 0};
+        frames[0] = (frame_t) {start_p, start_o, 0, NO_FACE, 0, start_h};
 
         for (;;) {
             frame_t *current = &frames[depth];
-            unsigned f = depth + heuristic(current->p, current->o);
+            /* Check a new frame once; resumed parents select their next move. */
+            if (current->next_move == 0) {
+                unsigned f = depth + current->h;
+                if (f > bound) {
+                    if (f < next_bound)
+                        next_bound = f;
+                    if (depth == 0)
+                        break;
+                    --depth;
+                    continue;
+                }
 
-            /* This branch is too expensive for the current iteration. */
-            if (f > bound) {
-                if (f < next_bound)
-                    next_bound = f;
+                if (current->p == 0 && current->o == 0) {
+                    for (unsigned i = 1; i <= depth; ++i)
+                        solution[i - 1] = frames[i].incoming_move;
+                    return (int) depth;
+                }
+
+                /* No child frame exists beyond MAX_DEPTH. */
+                if (depth == MAX_DEPTH) {
+                    --depth;
+                    continue;
+                }
+            }
+
+            if (current->next_move == MOVES) {
                 if (depth == 0)
                     break;
                 --depth;
                 continue;
             }
 
-            /* A zero heuristic alone does not mean the cube is solved. */
-            if (current->p == 0 && current->o == 0) {
-                for (unsigned i = 1; i <= depth; ++i)
-                    solution[i - 1] = frames[i].incoming_move;
-                return (int) depth;
-            }
-
-            /* Never write frames[12], including on a non-goal depth 11. */
-            if (depth == MAX_DEPTH || current->next_move == MOVES) {
-                if (depth == 0)
-                    break;
-                --depth;
-                continue;
-            }
-
-            /* Increment before descending so backtracking resumes here. */
-            uint8_t move = current->next_move++;
+            uint8_t move = current->next_move;
             uint8_t face = (uint8_t) (move / 3U);
-            if (face == current->previous_face)
+            if (face == current->previous_face) {
+                current->next_move = (uint8_t) (move + 3U);
                 continue;
-
-            uint16_t p = current->p, o = current->o;
-            for (uint8_t i = 0; i <= move % 3U; ++i) {
-                p = permutation[face][p];
-                o = orientation[face][o];
             }
+            ++current->next_move;
 
-            /* R, R2 and R' each add ONE move to the search depth. */
+            frame_t *child = &frames[depth + 1];
+            /* R2/R' continue from the preceding sibling's coordinates. */
+            uint16_t p = move % 3U == 0 ? current->p : child->p;
+            uint16_t o = move % 3U == 0 ? current->o : child->o;
+            p = permutation[face][p];
+            o = orientation[face][o];
+
+            *child = (frame_t) {p, o, 0, face, move, heuristic(p, o)};
             ++depth;
-            frames[depth] = (frame_t) {p, o, 0, face, move, 0};
         }
 
         if (next_bound == UINT32_MAX)
