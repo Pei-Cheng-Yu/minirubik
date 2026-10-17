@@ -1,9 +1,9 @@
+*.swp
 .frama-c/
 .frama-c-mcp/
-*.swp
-solver
-mini
-gen_pdb
-pdb4_data.h
-pdb4_data.h.tmp
-build/
+/solver
+/mini
+/gen_pdb
+/separate_pdb_data.h
+/separate_pdb_data.h.tmp
+/build/

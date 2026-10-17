@@ -48,7 +48,7 @@ shortest distance 11; moves can cancel or admit a shorter solution.
 
 The generator includes `solver.c` with its CLI main renamed, so it can reuse
 the existing static cube functions without modifying the solver. Consequently,
-building it requires `pdb4_data.h`; make generates that dependency if missing.
+building it requires `separate_pdb_data.h`; make generates that dependency if missing.
 However, BFS never calls the PDB heuristic or IDA*. This is not an independent
 implementation of the move model.
 
@@ -89,3 +89,35 @@ reuse of a cached heuristic value. These are C operation counts, not Ripes
 instruction counts or native timing results. Regenerate them when the search
 or heuristic changes. This diagnostic driver and counter are AI-assisted;
 existing assistant-run results do not claim personal student measurements.
+
+## Separate permutation/orientation PDBs
+
+The C solver now reads `permutation_distances[p]` and `orientation_distances[o]`
+and returns their maximum. Each table stores one byte per rank: 5,040 + 729 =
+5,769 bytes. No decoding, four-cubie projection, pattern ranking or nibble
+unpacking is needed during heuristic evaluation. IDA* traversal is unchanged.
+
+`gen_pdb.c` builds both tables on the host and emits
+`separate_pdb_data.h`. The move definitions live directly in `solver.c` and
+`gen_pdb.c`; there is no extra move header. The generator uses factorial/base-3
+decoding on the host; its queues and transition arrays
+are not part of the generated header. It does not include solver.c or depend
+on a previously generated table, so a clean build has no dependency cycle.
+
+```sh
+make solver heuristic-counter
+make check check-pdb
+```
+
+`check-pdb` checks table completeness, exact projected distances, and H1 over
+all 3,674,160 full states. It also checks optimal solution lengths and replays
+all 2,644 distance-11 states plus deterministic samples at other depths.
+This is not a full H3 sweep of every starting state. These tables use bytes,
+so packed-entry checks do not apply to this variant.
+
+The former four-cubie generator is preserved in Git history. `gen_pdb.c` now
+generates only the separate tables; `make check-pdb` checks this version.
+The assembly files and export_pdb.c still describe the earlier four-cubie
+variant; they have not been converted by this C change. Regenerate C call
+counts into a new file, such as `build/states/heuristic_counts_separate.csv`,
+to preserve the earlier four-cubie measurements for comparison.
