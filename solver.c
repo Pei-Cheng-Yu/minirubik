@@ -43,6 +43,7 @@ static const uint8_t twist[3][7] = {
 
 /* The three quarter-turns preserve the fixed front-upper-left corner. */
 /*@ requires face < 3;
+    requires \forall integer i; 0 <= i < CUBIES ==> state.o[i] < 3;
     assigns \nothing;
     ensures \forall integer i; 0 <= i < CUBIES ==>
               \result.p[i] == state.p[source[face][i]];
@@ -63,16 +64,20 @@ static state_t quarter_turn(state_t state, uint8_t face)
     for (uint8_t i = 0; i < CUBIES; ++i) {
         uint8_t from = source[face][i];
         result.p[i] = state.p[from];
-        result.o[i] = (uint8_t) ((state.o[from] + twist[face][i]) % 3U);
+        unsigned value = state.o[from] + twist[face][i];
+        if (value >= 3U)
+            value -= 3U;
+        result.o[i] = (uint8_t) value;
     }
     return result;
 }
 
 static state_t apply_move(state_t state, uint8_t move)
 {
-    uint8_t turns = (uint8_t) (move % 3U + 1U);
+    uint8_t face = (uint8_t) ((move >= 3U) + (move >= 6U));
+    uint8_t turns = (uint8_t) (move - ((face << 1) + face) + 1U);
     for (uint8_t i = 0; i < turns; ++i)
-        state = quarter_turn(state, (uint8_t) (move / 3U));
+        state = quarter_turn(state, face);
     return state;
 }
 
@@ -83,10 +88,15 @@ static state_t apply_move(state_t state, uint8_t move)
       state->p[i] != state->p[j];
     requires \forall integer i; 0 <= i < CUBIES ==>
       0 <= state->o[i] < 3;
-    assigns \nothing;
-    ensures \result < STATES;
+    requires \valid(permutation_rank) && \valid(orientation_rank);
+    requires \separated(state, permutation_rank, orientation_rank);
+    assigns *permutation_rank, *orientation_rank;
+    ensures *permutation_rank < PERMUTATIONS;
+    ensures *orientation_rank < ORIENTATIONS;
  */
-static uint32_t rank_state(const state_t *state)
+static void rank_components(const state_t *state,
+                            uint16_t *permutation_rank,
+                            uint16_t *orientation_rank)
 {
     uint32_t p = 0, o = 0;
     /*@ loop invariant 0 <= i <= CUBIES;
@@ -119,7 +129,23 @@ static uint32_t rank_state(const state_t *state)
      */
     for (uint8_t i = 0; i < 6; ++i)
         o = o * 3U + state->o[i];
-    return p * ORIENTATIONS + o;
+    *permutation_rank = (uint16_t) p;
+    *orientation_rank = (uint16_t) o;
+}
+
+/*@ requires \valid_read(state);
+    requires \forall integer i; 0 <= i < CUBIES ==> state->p[i] < CUBIES;
+    requires \forall integer i, j; 0 <= i < j < CUBIES ==>
+      state->p[i] != state->p[j];
+    requires \forall integer i; 0 <= i < CUBIES ==> state->o[i] < 3;
+    assigns \nothing;
+    ensures \result < STATES;
+ */
+static uint32_t rank_state(const state_t *state)
+{
+    uint16_t p, o;
+    rank_components(state, &p, &o);
+    return (uint32_t) p * ORIENTATIONS + o;
 }
 
 /*@ requires \valid(state); requires rank < STATES; assigns *state; */
@@ -198,7 +224,13 @@ static int valid(const state_t *state)
                 return 0;
         sum = (uint8_t) (sum + state->o[i]);
     }
-    return sum % 3U == 0;
+    if (sum >= 12U)
+        sum -= 12U;
+    if (sum >= 6U)
+        sum -= 6U;
+    if (sum >= 3U)
+        sum -= 3U;
+    return sum == 0;
 }
 
 static uint16_t permutation[3][PERMUTATIONS];
@@ -296,17 +328,18 @@ static int solve_ida(uint16_t start_p, uint16_t start_o,
             }
 
             uint8_t move = current->next_move;
-            uint8_t face = (uint8_t) (move / 3U);
+            uint8_t face = (uint8_t) ((move >= 3U) + (move >= 6U));
             if (face == current->previous_face) {
                 current->next_move = (uint8_t) (move + 3U);
                 continue;
             }
             ++current->next_move;
+            uint8_t remainder = (uint8_t) (move - ((face << 1) + face));
 
             frame_t *child = &frames[depth + 1];
             /* R2/R' continue from the preceding sibling's coordinates. */
-            uint16_t p = move % 3U == 0 ? current->p : child->p;
-            uint16_t o = move % 3U == 0 ? current->o : child->o;
+            uint16_t p = remainder == 0 ? current->p : child->p;
+            uint16_t o = remainder == 0 ? current->o : child->o;
             p = permutation[face][p];
             o = orientation[face][o];
 
@@ -355,7 +388,8 @@ static int parse_state(const char *input, state_t *state)
         int limit = i < 7 ? 7 : 3;
         if (input[i] < '1' || input[i] > '0' + limit)
             return 0;
-        (i < 7 ? state->p : state->o)[i % 7] = (uint8_t) (input[i] - '1');
+        int index = i < 7 ? i : i - 7;
+        (i < 7 ? state->p : state->o)[index] = (uint8_t) (input[i] - '1');
     }
     return input[14] == '\0' && valid(state);
 }
@@ -410,13 +444,10 @@ int main(int argc, char **argv)
 
     build_moves();
 
-    uint32_t rank = rank_state(&state);
+    uint16_t p, o;
+    rank_components(&state, &p, &o);
     uint8_t solution[MAX_DEPTH];
-    int length = solve_ida(
-        (uint16_t) (rank / ORIENTATIONS),
-        (uint16_t) (rank % ORIENTATIONS),
-        solution
-    );
+    int length = solve_ida(p, o, solution);
 
     if (length < 0) {
         fputs("could not find a solution\n", stderr);
