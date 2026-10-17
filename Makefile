@@ -129,3 +129,46 @@ heuristic-counter: build/states/count_heuristic
 build/states/count_heuristic: tools/count_heuristic.c solver.c separate_pdb_data.h
 	mkdir -p build/states
 	$(CC) $(CFLAGS) $< -o $@
+
+# GNU cross-binutils; override CROSS if the tools are not on PATH.
+CROSS ?= riscv64-unknown-elf-
+RVBUILD := build/rv32
+
+.PHONY: rv32 rv32-size
+rv32: $(RVBUILD)/solver.elf
+
+$(RVBUILD):
+	mkdir -p $@
+
+$(RVBUILD)/export_moves: export_moves.c solver.c separate_pdb_data.h | $(RVBUILD)
+	$(CC) $(CFLAGS) $< -o $@
+
+$(RVBUILD)/export_pdb: export_pdb.c separate_pdb_data.h | $(RVBUILD)
+	$(CC) $(CFLAGS) $< -o $@
+
+moves_data.s: $(RVBUILD)/export_moves
+	$< > $@.tmp && mv $@.tmp $@
+
+separate_pdb_data.s: $(RVBUILD)/export_pdb
+	$< > $@.tmp && mv $@.tmp $@
+
+$(RVBUILD)/solver.o: solver.s | $(RVBUILD)
+	$(CROSS)as -march=rv32i -mabi=ilp32 $< -o $@
+
+$(RVBUILD)/moves_data.o: moves_data.s | $(RVBUILD)
+	$(CROSS)as -march=rv32i -mabi=ilp32 $< -o $@
+
+$(RVBUILD)/separate_pdb_data.o: separate_pdb_data.s | $(RVBUILD)
+	$(CROSS)as -march=rv32i -mabi=ilp32 $< -o $@
+
+$(RVBUILD)/solver.elf: $(RVBUILD)/solver.o $(RVBUILD)/moves_data.o $(RVBUILD)/separate_pdb_data.o link.ld
+	$(CROSS)ld -m elf32lriscv --no-relax -T link.ld -Map=$(RVBUILD)/solver.map $(filter %.o,$^) -o $@
+
+rv32-size: rv32
+	$(CROSS)size -A $(RVBUILD)/solver.elf
+
+.PHONY: rv32-tables check-table-exports
+rv32-tables: moves_data.s separate_pdb_data.s
+
+check-table-exports: rv32
+	python3 tests/check_table_exports.py --cc "$(CC)" --cross "$(CROSS)" --dir "$(RVBUILD)"

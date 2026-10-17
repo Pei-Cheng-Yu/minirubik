@@ -7,3 +7,9 @@
 /separate_pdb_data.h
 /separate_pdb_data.h.tmp
 /build/
+/export_moves
+/export_moves.exe
+/export_pdb
+/export_pdb.exe
+/moves_data.s.tmp
+/separate_pdb_data.s.tmp

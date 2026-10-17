@@ -117,7 +117,22 @@ so packed-entry checks do not apply to this variant.
 
 The former four-cubie generator is preserved in Git history. `gen_pdb.c` now
 generates only the separate tables; `make check-pdb` checks this version.
-The assembly files and export_pdb.c still describe the earlier four-cubie
-variant; they have not been converted by this C change. Regenerate C call
+The solver assembly now uses the separate-PDB search. Regenerate C call
 counts into a new file, such as `build/states/heuristic_counts_separate.csv`,
 to preserve the earlier four-cubie measurements for comparison.
+
+
+## Assembly table export
+
+`make rv32-tables` writes `moves_data.s` and `separate_pdb_data.s` in the
+repository root so they can be committed. The former exports the halfword labels
+`permutation_moves` and `orientation_moves` in R, B, D row order; the latter
+exports the byte labels `permutation_distances` and `orientation_distances`.
+The linker includes both objects with `solver.s` when running `make rv32`.
+Set `CROSS` to your GNU RISC-V tool prefix if it is not on PATH.
+
+`make check-table-exports` checks every emitted entry against the current C
+arrays, then checks the linked `.rodata` bytes, global label addresses and
+halfword alignment. The four tables occupy 40,383 bytes. This checks data
+export and linking, not solver execution.
+`make check-pdb` separately checks the distance tables against full-state BFS.
