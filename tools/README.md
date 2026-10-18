@@ -136,3 +136,52 @@ arrays, then checks the linked `.rodata` bytes, global label addresses and
 halfword alignment. The four tables occupy 40,383 bytes. This checks data
 export and linking, not solver execution.
 `make check-pdb` separately checks the distance tables against full-state BFS.
+
+## Ripes GUI animation
+
+Run `make rv32-gui` to generate `build/rv32/solver_gui.s`. Open that file as
+assembly source in Ripes. Keep editing `solver.s`, not the generated file.
+The builder includes the renderer, combines both table files, removes the
+conditional directives unsupported by the tested Ripes assembler, and converts
+GNU section/alignment directives to Ripes syntax. The renderer-selection approach
+is also used by [illdoCc's build script](https://github.com/illdoCc/minirubik/blob/main/tools/build_ripes.py).
+
+Building the GUI source does not require Ripes to be installed or its path to
+be configured. After cloning, run `make rv32-gui` from the repository root
+(requires Make, Python 3.10 or newer, and a host C compiler for table generation),
+then open `build/rv32/solver_gui.s` manually in Ripes. This source build does not
+use `link.ld`; Ripes's built-in assembler resolves its labels and data layout.
+
+To generate and open the file in one command, with Ripes on PATH:
+
+```sh
+make run-rv32-gui
+```
+
+If Ripes is not on PATH, supply its location on that machine using
+`make run-rv32-gui RIPES="/path/to/Ripes"`. This is a local command-line override,
+not a repository setting. From WSL, it may point to a Windows executable under
+`/mnt/c/`; the builder converts the source path to Windows format.
+
+From PowerShell, with Python on PATH, generate the source without launching Ripes:
+
+```powershell
+python tools/build_ripes.py --render -o build/rv32/solver_gui.s
+```
+
+The direct Python command uses the existing root table exports. Run
+`make rv32-tables` first if their generator inputs changed.
+
+In Ripes, instantiate LED Matrix 0 with Width 35 and Height 25, select a
+32-bit ISA simulator or a processor with hazard handling, and disable ISA
+extensions for the assignment. Rebuild with Ctrl+B after changing the peripheral
+configuration. Pop out the LED window, reset with F3, and run with F8.
+The initial cube remains visible while IDA* searches, then each solution move
+is replayed and displayed. This command opens the GUI; it does not create the
+peripheral or press Run for you.
+
+For CLI measurement, continue using `make rv32` and the linked
+`build/rv32/solver.elf`. That build uses GNU binutils and `link.ld`, with
+`RENDER` set to 0 in `solver.s`. Coordinate replay and its final solved check run
+in both builds; array decoding, drawing, and delays are GUI-only. Do not use
+the GUI build's instruction count as the renderer-disabled measurement.

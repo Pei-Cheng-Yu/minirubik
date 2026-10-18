@@ -1,8 +1,9 @@
 # minirubik
 
-An optimal C99 solver for the 2×2×2 Rubik’s Cube. It builds a breadth-first
-table for all 3,674,160 states and solves every valid position in at most 11
-half-turn-metric moves.
+An optimal C99 and RV32I solver for the 2×2×2 Rubik’s Cube. The current solver
+uses IDA* with separate permutation and orientation pattern databases. The
+state space contains 3,674,160 states, with an optimal distance of at most 11
+half-turn-metric moves. The RV32I version also supports LED animation in Ripes.
 
 ## Why a cube is a graph
 
@@ -16,8 +17,8 @@ their order matters—`R U` is generally not `U R`.
 
 Human solvers use those facts to move a few pieces while restoring the rest;
 the commutator `A B A⁻¹ B⁻¹` is the standard example. This program uses the
-same group structure differently: it treats every valid arrangement as a node,
-every face turn as an edge, and searches the entire graph once. It does not use
+same group structure differently: it treats every valid arrangement as a node
+and every face turn as an edge. It does not use
 the article’s 3×3 Roux stages or a library of memorized algorithms.
 
 The solver gives the eight corner positions the numbers `0–7`. The 2.5D
@@ -27,29 +28,83 @@ walkthrough below shows where those numbers are on the physical cube.
 
 1. Fix one corner to remove whole-cube rotations.
 2. Rank the remaining corner permutation and six independent orientations into
-   a dense integer.
-3. Breadth-first search outward from solved using `R`, `B`, and `D`, including
-   inverse and half turns.
-4. Store one move toward solved for every state; following those moves gives an
-   optimal solution of at most 11 moves.
+   separate integer coordinates.
+3. Build permutation-only and orientation-only distance tables on the host.
+4. Search with IDA*, using the maximum of the two distances as the heuristic.
+   Moves are `R`, `B`, and `D`, including inverse and half turns.
 
 ## Build and run
 
 ```sh
-make
+make all
 make check
 make prove   # optional: Frama-C WP proof, needs frama-c and alt-ergo
 ./solver 21345671111111
 ```
 
-`make` builds two binaries. `solver` is the documented one, with contracts, a
-`--self-test` mode, and diagnostics on stderr. `mini` is a golfed variant that
-solves the same input and prints the same line, kept as a readability contrast;
-it has no `--self-test` and prints nothing on failure, and it trades roughly
-eight times the runtime and three times the memory for its brevity.
+`make all` builds two binaries. `solver` uses IDA*, with a `--self-test` mode
+and diagnostics on stderr. `mini` retains the original golfed BFS algorithm;
+it has no `--self-test`. Both return shortest solutions, but their move
+sequences can differ.
 
 The 14-digit argument describes the scramble and the printed line is the
 solution. Both formats are explained below.
+
+### Ripes: LED animation
+
+Use the Ripes continuous build with the 32-bit ISA simulator. From the repository
+root in Linux or WSL, with Make, a host C compiler, and Python 3.10 or newer:
+
+```sh
+make rv32-gui
+```
+
+Open `build/rv32/solver_gui.s` as assembly source in Ripes. This generated file
+combines `solver.s`, `moves_data.s`, and `separate_pdb_data.s`, includes the
+renderer, and adapts directives for Ripes's assembler. It does not use `link.ld`.
+Edit `cube_input` in `solver.s` to select the input, then regenerate and reopen
+the generated file. Keep editing the original source, not the generated file.
+
+1. Add LED Matrix 0 in the I/O tab, with width 35 and height 25.
+2. Select the 32-bit ISA simulator and disable ISA extensions.
+3. Rebuild with Ctrl+B after adding or changing the peripheral.
+4. Pop out the LED display, reset, then press the `>>` Run button.
+
+The program displays the input, searches, prints the solution, and redraws after
+each complete move. `R2` counts as one move and produces one redraw. The final
+cube should have uniform faces: U white, L orange, F green, R red, B blue,
+D yellow. Output `-1` means search failure; `-2` means replay did not reach solved.
+
+For example, input `62345713133111` has the eight-move solution
+`R2 D B2 R' D R' D B'`, with nine displayed states including the input.
+
+If Ripes is on PATH, `make run-rv32-gui` also opens the generated source.
+Otherwise, supply its local executable path using `RIPES="/path/to/Ripes"`.
+No personal installation path is stored in the build scripts. See
+[tools/README.md](tools/README.md#ripes-gui-animation) for PowerShell and WSL options.
+
+### Ripes: CLI instruction measurement
+
+Install GNU RISC-V binutils and leave `.equ RENDER, 0` in `solver.s`:
+
+```sh
+make rv32-size
+Ripes --mode cli --src build/rv32/solver.elf -t elf --proc RV32_ISS --iret --runinfo
+```
+
+The default cross-tool prefix is `riscv64-unknown-elf-`; override `CROSS` if
+needed, for example `make rv32-size CROSS=riscv32-unknown-elf-`. Run the CLI
+command with the Ripes executable installed on that machine.
+
+This route uses GNU assembly and `link.ld` to produce `solver.elf`. It excludes
+LED drawing and animation delays; coordinate replay and the final solved check
+remain enabled. `--iret` counts the whole executed program, including input
+parsing, search, printing, and replay. Code size is the linked `.text` size;
+static data is `.data` plus `.bss` plus `.rodata`. Use the same input and Ripes
+build when comparing measurements. These commands run one input, not every state.
+
+Commit the sources, table exports, and build scripts. Files under `build/`,
+including `solver_gui.s` and `solver.elf`, are regenerated and ignored by Git.
 
 ### Reading the 14-digit input
 
@@ -194,7 +249,7 @@ being twisted. For a valid cube, convert orientation digits to `0`, `1`, and
 
 ```sh
 $ ./solver 21345671111111
-B' R' D2 R' B R B' R D2 B R'
+R B' D2 R' B R' B' R D2 R B
 ```
 
 Each token is one face turn. Apply them left to right; after the last one the
@@ -222,5 +277,5 @@ whichever suffix it carries, which is the half-turn metric; under that metric no
 position needs more than 11 moves. Solving an already-solved cube prints an
 empty line.
 
-See [`report.md`](report.md) for the model, algorithm, diagrams, and Frama-C
-validation notes.
+See [`report.md`](report.md) for the original BFS baseline's model, algorithm,
+diagrams, and Frama-C validation notes.

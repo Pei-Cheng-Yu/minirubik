@@ -1,3 +1,5 @@
+.equ RENDER, 0
+
 .data
 stack_storage:
     .zero 128
@@ -32,7 +34,44 @@ move_names:
     .word move_r, move_r2, move_ri
     .word move_b, move_b2, move_bi
     .word move_d, move_d2, move_di
-    
+cube_sources:
+    .byte 1, 4, 2, 0, 3, 5, 6     #R
+    .byte 0, 1, 2, 4, 5, 6, 3     #B
+    .byte 0, 2, 5, 3, 1, 4, 6     #D
+
+cube_twists:
+    .byte 1, 2, 0, 2, 1, 0, 0     #R
+    .byte 0, 0, 0, 1, 2, 1, 2     #B
+    .byte 0, 0, 0, 0, 0, 0, 0     #D
+.align 4
+.if RENDER
+led_colors:
+    .word 0x00FFFFFF    # ID 0:white (U)
+    .word 0x00FFA500    # ID 1:orange (L)
+    .word 0x0000FF00    # ID 2:green (F)
+    .word 0x00FF0000    # ID 3:red (R)
+    .word 0x000000FF    # ID 4:blue (B)
+    .word 0x00FFFF00    # ID 5:yellow (D)
+corner_colors:
+    .byte 0, 2, 1      #cubie 0: U F L — white, green, orange
+    .byte 0, 3, 2      #cubie 1: U R F — white, red, green
+    .byte 5, 2, 3      #cubie 2: D F R — yellow, green, red
+    .byte 5, 1, 2      #cubie 3: D L F — yellow, orange, green
+    .byte 0, 4, 3      #cubie 4: U B R — white, blue, red
+    .byte 5, 3, 4      #cubie 5: D R B — yellow, red, blue
+    .byte 5, 4, 1      #cubie 6: D B L — yellow, blue, orange
+    .byte 0, 1, 4      #cubie 7: U L B — white, orange, blue
+
+corner_screen: #xy pair for each slot (face)
+    .byte  9, 3,   9, 7,   4, 7     # 0: U, F, L
+    .byte 13, 3,  18, 7,  13, 7     # 1: U, R, F
+    .byte 13,14,  13,10,  18,10     # 2: D, F, R
+    .byte  9,14,   4,10,   9,10     # 3: D, L, F
+    .byte 13, 0,  27, 7,  22, 7     # 4: U, B, R
+    .byte 13,17,  22,10,  27,10     # 5: D, R, B
+    .byte  9,17,  31,10,   0,10     # 6: D, B, L
+    .byte  9, 0,   0, 7,  31, 7     # 7: U, L, B
+.endif    
 .text
 .globl main
 main:
@@ -63,9 +102,17 @@ array_o:
      addi t0, t0, 1 # got the next index offset
      blt t0, t4, array_o
 
+.if RENDER
+    la a0, p
+    la a1, o
+    jal ra, render_cube
+    jal ra, render_delay
+.endif
      la a0, p
      la a1, o
      jal ra, rank
+     mv s0, a0 #starting p, o
+     mv s1, a1
      la a2, solution
      jal ra, solve_ida
     
@@ -76,7 +123,7 @@ array_o:
     li s6, 0 #i=0
     la s7, solution
 print_move_loop:
-    bge s6, s5, print_move_done
+    bge s6, s5, replay_finished
     
     beq s6, zero, print_move_id
     li a0, 32
@@ -94,22 +141,108 @@ print_move_id:
     li a7, 4 #ripes printint
     ecall
     
+    
+    add t0, s7, s6
+    lbu a2, 0(t0)
+
+    mv a0, s0
+    mv a1, s1
+    jal ra, replay_move
+
+    #save new rank 
+    mv s0, a0
+    mv s1, a1
+
+.if RENDER
+    #decode updated rank to array
+    mv a0, s0
+    mv a1, s1
+    la a2, p
+    la a3, o
+    jal ra, unrank
+
+    #draw arrays
+    la a0, p
+    la a1, o
+    jal ra, render_cube
+    jal ra, render_delay
+.endif
+
     addi s6, s6, 1
     j print_move_loop
     
-print_move_done:
+replay_finished:
+    or t0, s0, s1  #solve when both rank =0
+    bne t0, zero, replay_failed
+    j test_done
+
+replay_failed:
+    li a0, -2   #replay failed
+    li a7, 1
+    ecall
     j test_done
     
 search_failed:
     li a0, -1  #print -1
     li a7, 1
     ecall
-    j print_move_done
+    j test_done
     
 test_done:
      li a7, 10
      ecall
+replay_move:
+    addi sp, sp, -32
+    sw ra, 28(sp)
+    sw s0, 24(sp)
+    sw s1, 20(sp)
+    sw s2, 16(sp)
+    sw s3, 12(sp)
 
+    mv s0, a0 # p rank
+    mv s1, a1 # o rank
+
+    # face: R=0, B=1, D=2
+    li s2, 0
+    li t0, 3
+    bltu a2, t0, replay_face_ready
+
+    li s2, 1
+    li t0, 6
+    bltu a2, t0, replay_face_ready
+
+    li s2, 2
+
+replay_face_ready:
+    # turns=moveID-face*3+1
+    slli t0, s2, 1
+    add t0, t0, s2
+    sub s3, a2, t0
+    addi s3, s3, 1
+
+replay_quarter_loop:
+    mv a0, s0
+    mv a1, s1
+    mv a2, s2
+    jal ra, move_quarter
+
+    mv s0, a0
+    mv s1, a1
+
+    addi s3, s3, -1
+    bne s3, zero, replay_quarter_loop
+
+    #return new p o
+    mv a0, s0
+    mv a1, s1
+
+    lw ra, 28(sp)
+    lw s0, 24(sp)
+    lw s1, 20(sp)
+    lw s2, 16(sp)
+    lw s3, 12(sp)
+    addi sp, sp, 32
+    ret
     
 rank:
     li t0, 0 #p
@@ -488,3 +621,127 @@ clean_up:
     lw s4, 96(sp)
     addi sp, sp, 128
     ret
+
+.if RENDER
+draw_sticker:
+    li t0, LED_MATRIX_0_BASE
+    li t1, LED_MATRIX_0_WIDTH
+    slli t1, t1, 2
+    mv t2, a1
+draw_get_row:
+    beq t2, zero, draw_get_column
+    add t0, t0, t1
+    addi t2, t2, -1
+    j draw_get_row
+    
+draw_get_column:
+    slli t2, a0, 2 #x * 4 bytes
+    add t0, t0, t2
+    li t2, 3
+draw_sticker_row:
+    sw a2, 0(t0)
+    sw a2, 4(t0)
+    sw a2, 8(t0)
+    sw a2, 12(t0)             
+
+    add t0, t0, t1    # next row
+    addi t2, t2, -1
+    bne t2, zero, draw_sticker_row
+    ret
+    
+render_cube:
+    addi sp, sp, -32
+    sw ra, 28(sp)
+    sw s0, 24(sp)
+    sw s1, 20(sp)
+    sw s2, 16(sp)
+    sw s3, 12(sp)
+    sw s4, 8(sp)
+    sw s5, 4(sp)
+
+    mv s0, a0           #p addr 
+    mv s1, a1           #o addr
+    li s2, 0  #position=0
+
+get_position:
+    li s4, 0 #cubie
+    li s5, 0 #orientaion
+    beq s2, zero, position_done
+    
+    addi t0, s2, -1 #index = pos -1
+    add t1, s0, t0
+    lbu s4, 0(t1)
+    addi s4, s4, 1 #cubie=p[index] +1
+    
+    add t1, s1, t0
+    lbu s5, 0(t1) #orientation = o[index]
+    
+position_done:
+    li s3, 0   #slot= 0
+    
+get_color_slot:
+    #colorslot = slot+orient ) %3
+    add t0, s3, s5
+    li t1, 3
+    bltu t0, t1, color_slot_done
+    addi t0, t0, -3
+    
+color_slot_done:
+    #offset = cubie*3+color_slot
+    slli t1, s4, 1 
+    add t1, t1, s4 #cubie*3
+    add t1, t1, t0
+    
+    la t2, corner_colors
+    add t2, t2, t1
+    lbu t0, 0(t2)  #colorID
+    
+    #4b for each entry
+    slli t0, t0, 2
+    la t1, led_colors
+    add t1, t1, t0
+    lw a2, 0(t1) #RGB
+    
+    #offset for corner_screen = pos*6+slot*2
+    slli t0, s2, 2 
+    slli t1, s2, 1 
+    add t0, t0, t1 #position*6
+
+    slli t1, s3, 1 #slot* 2
+    add t0, t0, t1
+    
+    
+    la t1, corner_screen
+    add t1, t1, t0
+    lbu a0, 0(t1) #x
+    lbu a1, 1(t1) #y
+    
+    jal ra, draw_sticker
+    
+    #next sticker for htis pos
+    addi s3, s3, 1
+    li t0, 3
+    blt s3, t0, get_color_slot
+    
+    #next pos
+    addi s2, s2, 1
+    li t0, 8
+    blt s2, t0, get_position
+    
+render_done:
+    lw ra, 28(sp)
+    lw s0, 24(sp)
+    lw s1, 20(sp)
+    lw s2, 16(sp)
+    lw s3, 12(sp)
+    lw s4, 8(sp)
+    lw s5, 4(sp)
+    addi sp, sp, 32
+    ret
+render_delay:
+    li t0, 10000000 
+render_delay_loop:
+    addi t0, t0, -1
+    bne t0, zero, render_delay_loop
+    ret
+.endif

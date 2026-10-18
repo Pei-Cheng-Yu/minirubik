@@ -132,6 +132,8 @@ build/states/count_heuristic: tools/count_heuristic.c solver.c separate_pdb_data
 
 # GNU cross-binutils; override CROSS if the tools are not on PATH.
 CROSS ?= riscv64-unknown-elf-
+PYTHON ?= python3
+RIPES ?= Ripes
 RVBUILD := build/rv32
 
 .PHONY: rv32 rv32-size
@@ -172,3 +174,12 @@ rv32-tables: moves_data.s separate_pdb_data.s
 
 check-table-exports: rv32
 	python3 tests/check_table_exports.py --cc "$(CC)" --cross "$(CROSS)" --dir "$(RVBUILD)"
+
+.PHONY: rv32-gui run-rv32-gui
+rv32-gui: $(RVBUILD)/solver_gui.s
+
+$(RVBUILD)/solver_gui.s: solver.s moves_data.s separate_pdb_data.s tools/build_ripes.py | $(RVBUILD)
+	$(PYTHON) tools/build_ripes.py --render -o $@
+
+run-rv32-gui: rv32-gui
+	$(PYTHON) tools/build_ripes.py --render -o $(RVBUILD)/solver_gui.s --open --ripes "$(RIPES)"
